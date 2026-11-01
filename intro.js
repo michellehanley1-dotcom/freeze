@@ -29,7 +29,7 @@
     var el = document.createElement('div');
     el.id = 'freeze-intro';
     el.setAttribute('aria-hidden', 'true');
-    el.innerHTML = '<div class="frost"></div><div class="ic-row">' + icicleHtml() + '</div><div class="ic-title"></div>';
+    el.innerHTML = '<div class="edge-frost"></div><div class="frost"></div><div class="ic-row">' + icicleHtml() + '</div><div class="ic-title"></div>';
     var t = el.querySelector('.ic-title');
     t.textContent = opts.title || 'FREEZE';
     if (opts.sub) { var s = document.createElement('div'); s.className = 'ic-sub'; s.textContent = opts.sub; t.appendChild(s); }

@@ -24,20 +24,27 @@ async function firebaseBackend(cfg) {
   ]);
   const app = appM.initializeApp(cfg);
   const auth = authM.getAuth(app);
-  // Keep a saved Google/email login; only fall back to a guest login when nobody is signed in.
+  // Keep a saved Google or phone login; only fall back to a guest login when nobody is signed in.
   await auth.authStateReady();
   if (!auth.currentUser) await authM.signInAnonymously(auth);
   const uid = auth.currentUser.uid;
   const db = dbM.getDatabase(app);
   const roomRef = (code) => dbM.ref(db, 'rooms/' + code);
   const A = authM;
+  // Phone sign-in: an invisible reCAPTCHA guards the text, then a 6-digit code confirms it.
+  let verifier = null, pending = null;
+  const getVerifier = () => {
+    if (!verifier) verifier = new A.RecaptchaVerifier(auth, 'recaptcha-box', { size: 'invisible' });
+    return verifier;
+  };
+  const resetVerifier = () => { try { if (verifier) verifier.clear(); } catch (e) { /* ignore */ } verifier = null; };
   return {
     uid, demo: false,
     account() {
       const u = auth.currentUser;
       if (!u) return null;
       const email = u.email || ((u.providerData || []).find((x) => x.email) || {}).email || '';
-      return { anon: u.isAnonymous, email };
+      return { anon: u.isAnonymous, email, phone: u.phoneNumber || '' };
     },
     async google() {
       const prov = new A.GoogleAuthProvider();
@@ -54,14 +61,33 @@ async function firebaseBackend(cfg) {
         throw e;
       }
     },
-    async emailSignUp(email, pw) {
+    // Sends a text with a code. A guest keeps their player by linking the number to their account.
+    async phoneSend(number) {
       const u = auth.currentUser;
-      if (u && u.isAnonymous) { await A.linkWithCredential(u, A.EmailAuthProvider.credential(email, pw)); return { switched: false }; }
-      await A.createUserWithEmailAndPassword(auth, email, pw);
-      return { switched: true };
+      try {
+        pending = (u && u.isAnonymous)
+          ? await A.linkWithPhoneNumber(u, number, getVerifier())
+          : await A.signInWithPhoneNumber(auth, number, getVerifier());
+      } catch (e) { resetVerifier(); throw e; }
+      return { sent: true };
     },
-    async emailSignIn(email, pw) { await A.signInWithEmailAndPassword(auth, email, pw); return { switched: true }; },
-    async resetPassword(email) { await A.sendPasswordResetEmail(auth, email); },
+    // Checks the 6-digit code. If this number already has an account, sign into that account instead.
+    async phoneConfirm(code) {
+      if (!pending) { const err = new Error('no pending code'); err.code = 'auth/code-expired'; throw err; }
+      try {
+        await pending.confirm(code);
+      } catch (e) {
+        if (e.code === 'auth/credential-already-in-use') {
+          await A.signInWithCredential(auth, A.PhoneAuthProvider.credentialFromError(e));
+          pending = null;
+          return { switched: true };
+        }
+        throw e;
+      }
+      pending = null;
+      return { switched: false }; // the guest keeps the same player
+    },
+    phoneNumber() { return (auth.currentUser && auth.currentUser.phoneNumber) || ''; },
     async signOut() { await A.signOut(auth); },
     async myGames(id) {
       const s = await dbM.get(dbM.query(dbM.ref(db, 'history/' + id), dbM.orderByChild('at'), dbM.limitToLast(30)));
@@ -149,7 +175,7 @@ const ui = {
   backend: null, me: null, code: null, st: null, unsub: null, store: localStorage,
   profile: { name: '', icon: ICONS[19], color: 0, layout: 'row' },
   draft: null, sheet: null, boardTab: 'game', board: null, myStats: null, games: null,
-  form: { email: '', pw: '' }, authBusy: false,
+  form: { phone: '', code: '' }, phoneSent: false, authBusy: false,
   mode: null, sel: null, opening: [], phaseKey: '', toastT: 0,
   solo: { bots: 2, level: 'easy' }, botT: null, fxKey: null,
   err: null, errTimer: null, busy: false,
@@ -316,6 +342,12 @@ function renderLobby(st) {
     <div class="panel">
       <span class="eyebrow">${host ? 'How are we playing?' : 'Game settings (host picks)'}</span>
       ${modes}
+      <div class="mode ${s.turnSecs !== 0 ? 'on' : ''}" style="padding-bottom:12px">
+        <div class="head" style="cursor:default"><span class="radio"></span><span><span class="mt">Time per turn</span><span class="md">Run out of time and the game makes a simple move for you.</span></span></div>
+        <div class="body seg">
+          ${[[0, 'No timer'], [30, '30 sec'], [60, '1 min'], [120, '2 min']].map(([v, l]) => `<button type="button" class="btn small ${Number(s.turnSecs) === v ? 'on' : ''}" data-act="timer" data-v="${v}" ${dis} aria-pressed="${Number(s.turnSecs) === v}">${l}</button>`).join('')}
+        </div>
+      </div>
       <div class="mode ${s.practice ? 'on' : ''}">
         <button type="button" class="head" data-act="practice" ${dis} aria-pressed="${!!s.practice}"><span class="radio"></span><span><span class="mt">Practice game</span><span class="md">Plays normally, but doesn't count for wins, points or the leaderboard.</span></span></button>
       </div>
@@ -377,8 +409,10 @@ function renderTable(st) {
   const myTurn = st.status === 'playing' && cur === me;
   const ph = st.phase;
   const top = G.topDiscard(st);
-  const mi = st.seats.indexOf(me);
-  const others = mi >= 0 ? st.seats.slice(mi + 1).concat(st.seats.slice(0, mi)) : st.seats.slice();
+  // Everyone at the table, including a player who sat out this round after a failed freeze.
+  const table = st.players.map((p) => p.id).filter((id) => st.seats.includes(id) || (st.sitOut || []).includes(id));
+  const mi = table.indexOf(me);
+  const others = mi >= 0 ? table.slice(mi + 1).concat(table.slice(0, mi)) : table.slice();
   const rv = st.reveal;
   const fl = [st.last && st.last.flash, st.last && st.last.flash2].filter(Boolean);
   const isFlash = (id, i) => st.last && st.last.t > Date.now() - 4000 && fl.some((f) => f.id === id && f.i === i);
@@ -389,11 +423,11 @@ function renderTable(st) {
     const h = st.hands[id] || [];
     const minis = h.map((c, i) => card(c, {
       size: 'sm',
-      up: rv && rv.by === me && rv.owner === id && rv.idx === i,
+      up: (st.sitOut || []).includes(id) || (rv && rv.by === me && rv.owner === id && rv.idx === i),
       act: pickTheirs && 'theirs', data: { o: id, i },
       flash: isFlash(id, i), aria: `${G.nameOf(st, id)}'s card ${i + 1}`, num: i + 1,
     })).join('');
-    const tag = st.freezeBy === id ? `<span class="tag">${SNOW.replace('<svg', '<svg width="11" height="11"')}Froze</span>` : '';
+    const tag = st.freezeBy === id ? `<span class="tag">${SNOW.replace('<svg', '<svg width="11" height="11"')}Froze</span>` : (st.sitOut || []).includes(id) ? '<span class="tag">Sat out</span>' : '';
     return `<div class="seat ${cur === id ? 'active' : ''}" style="left:${x}%;top:${y}%">
       <div class="minis">${minis}</div>
       <div class="who">${avatar(st, id, 28)}<span class="nm">${esc(G.nameOf(st, id))}</span></div>${tag}
@@ -402,7 +436,7 @@ function renderTable(st) {
 
   const lastNew = st.last && st.last.t !== ui.toastT;
   if (lastNew) ui.toastT = st.last.t;
-  const toast = st.last ? `<div class="toast ${lastNew ? 'new' : ''} ${st.freezeBy ? 'freeze' : ''}"><span class="dot"></span>${esc(st.last.text)}</div>` : '';
+  const toast = ui.shownPlay ? `<div class="toast ${lastNew ? 'new' : ''} ${st.freezeBy ? 'freeze' : ''}"><span class="dot"></span>${esc(ui.shownPlay)}</div>` : '';
 
   const canChoose = myTurn && ph === 'choose' && !ui.mode;
   const drawPile = `<button type="button" class="pile" data-act="${canChoose ? 'draw' : ''}" ${canChoose ? '' : 'disabled'} aria-label="Draw pile, ${st.deck.length} cards">
@@ -414,6 +448,13 @@ function renderTable(st) {
   if (ph === 'drawn' && st.drawn) {
     const mine = cur === me;
     held = `<div class="held">${card(st.drawn, { size: 'lg', up: mine || st.from === 'discard', glow: mine })}<span class="plbl">${mine ? 'You drew' : esc(G.nameOf(st, cur)) + ' holds'}</span></div>`;
+  }
+
+  let drawLine = '';
+  if (ph === 'drawn' && st.drawn && cur === me) {
+    const r = G.rankOf(st.drawn);
+    const pw = G.POWERS[r];
+    drawLine = `<div class="drawline">You drew <b>${esc(G.label(st.drawn))}</b>${pw && st.from === 'deck' ? ` · power: <b>${G.POWER_NAMES[r]}</b>` : ''}</div>`;
   }
 
   const hand = seated ? (st.hands[me] || []) : [];
@@ -430,7 +471,7 @@ function renderTable(st) {
   return `<section class="game">
     <div class="topbar">
       <button type="button" class="icon-btn" data-act="home" aria-label="Leave game">${ICON.back}</button>
-      <div class="mid"><span class="eyebrow">${modeLine}</span><span class="goal">Goal: <b>4 or less</b></span></div>
+      <div class="mid"><span class="eyebrow">${modeLine}</span><span class="goal">Goal: <b>4 or less</b>${st.turnEnds ? ` · <span class="clock">${clockText(st.turnEnds)}</span>` : ''}</span></div>
       <div class="row" style="gap:6px">
         <button type="button" class="icon-btn" data-act="openBoard" aria-label="Standings">${ICON.trophy}</button>
         <button type="button" class="icon-btn" data-act="openProfile" aria-label="Settings and rules">${ICON.gear}</button>
@@ -438,9 +479,10 @@ function renderTable(st) {
     </div>
     <div class="felt">
       <div class="seats">${seats}${toast}</div>
-      <div class="center">${drawPile}${held}${discardPile}</div>
+      <div class="center">${drawPile}${held}${discardPile}</div>${drawLine}
       <div class="myhand ${handClass()}">${myCards || (seated ? '<span class="mine-label">No cards left!</span>' : '<span class="mine-label">You are out. Watching this round.</span>')}</div>
       ${seated ? `<div class="mine-label">${myTurn ? 'Your turn' : 'Your hand'}</div>` : ''}
+      ${myTurn && ph === 'post' ? postPopup(st) : ''}
     </div>
     <div class="actions">${actionBar(st, myTurn, top)}</div>
   </section>`;
@@ -473,20 +515,13 @@ function actionBar(st, myTurn, top) {
     if (ui.mode === 'swap') return `${fz}<p class="prompt">Tap the card to replace with your <b>${esc(G.label(st.drawn))}</b>.</p><div class="btnrow">${cancel}</div>`;
     const r = G.rankOf(st.drawn);
     const power = G.POWERS[r];
-    return `${fz}<p class="prompt">You drew <b>${esc(G.label(st.drawn))}</b>${power ? ` · power: <b>${G.POWER_NAMES[r]}</b>` : ''}</p>
-      <div class="btnrow">
+    return `${fz}<div class="btnrow">
         <button type="button" class="btn ${power ? '' : 'primary'}" data-act="swapMode">Swap in</button>
         <button type="button" class="btn" data-act="discard">Discard</button>
         ${power ? '<button type="button" class="btn primary" data-act="power">Use power</button>' : ''}
       </div>`;
   }
-  if (ph === 'post') {
-    return `${fz}<p class="prompt">${st.freezeBy ? `Last turn. End it when you're done.` : 'Good go? Call Freeze now, or end your turn.'}</p>
-      <div class="btnrow">
-        ${st.freezeBy ? '' : `<button type="button" class="btn ice" data-act="freeze">${SNOW.replace('<svg', '<svg width="18" height="18"')} Call Freeze</button>`}
-        <button type="button" class="btn primary" data-act="pass">End turn</button>
-      </div>`;
-  }
+  if (ph === 'post') return fz; // the pop-up above has the buttons
   if (ph === 'p7') return `${fz}<p class="prompt">Tap one of <b>your</b> cards to look at it.</p>`;
   if (ph === 'p8') return `${fz}<p class="prompt">Tap any <b>rival's</b> card to look at it.</p>`;
   if (ph === 'p10') {
@@ -556,44 +591,59 @@ function accountSection() {
   if (!acct) return '<p class="banner">Accounts work once the game is online.</p>';
   if (!acct.anon) {
     return `<div class="acct"><span class="lbl">Account</span>
-      <div class="row"><span class="grow" style="font-size:15px">Signed in${acct.email ? ` as <b>${esc(acct.email)}</b>` : ''}. Your wins and games are saved.</span></div>
+      <div class="row"><span class="grow" style="font-size:15px">Signed in${acct.phone ? ` as <b>${esc(acct.phone)}</b>` : ''}. Your wins and games are saved.</span></div>
       <button type="button" class="btn wide small" data-act="signOut">Log out</button></div>`;
   }
   const dis = ui.authBusy ? 'disabled' : '';
   return `<div class="acct"><span class="lbl">Save your player</span>
     <p class="sub" style="font-size:14px">You're playing as a guest. Sign in so your wins and game history follow you to any phone.</p>
     ${window.FREEZE_GOOGLE_SIGNIN ? `<button type="button" class="btn wide google" data-act="google" ${dis}><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg> Continue with Google</button>
-    <div class="ordiv"><span>or use email</span></div>` : ''}
-    <label class="lbl" for="email">Email</label>
-    <input id="email" class="field" type="email" autocomplete="email" inputmode="email" value="${esc(ui.form.email)}">
-    <label class="lbl" for="pw">Password (6+ characters)</label>
-    <input id="pw" class="field" type="password" autocomplete="current-password" value="${esc(ui.form.pw)}">
-    <div class="seg">
-      <button type="button" class="btn small" data-act="emailUp" ${dis}>Create account</button>
-      <button type="button" class="btn small" data-act="emailIn" ${dis}>Log in</button>
-    </div>
-    <button type="button" class="linkbtn" data-act="resetPw">Forgot password?</button>
+    <div class="ordiv"><span>or use your phone</span></div>` : ''}
+    ${ui.phoneSent ? `
+      <label class="lbl" for="code">Code we texted you</label>
+      <input id="code" class="field code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" value="${esc(ui.form.code)}">
+      <div class="seg">
+        <button type="button" class="btn primary" data-act="phoneVerify" ${dis}>Verify</button>
+        <button type="button" class="btn" data-act="phoneReset" ${dis}>Different number</button>
+      </div>`
+    : `
+      <label class="lbl" for="phone">Phone number</label>
+      <input id="phone" class="field" type="tel" autocomplete="tel" inputmode="tel" placeholder="(512) 555-0123" value="${esc(ui.form.phone)}">
+      <button type="button" class="btn primary wide" data-act="phoneSend" ${dis}>Text me a code</button>`}
   </div>`;
 }
 
 function authMessage(e) {
   const c = (e && e.code) || '';
   if (c.includes('popup-closed') || c.includes('cancelled-popup')) return 'Google sign-in was closed';
-  if (c.includes('popup-blocked')) return 'Allow pop-ups, or use email instead';
-  if (c.includes('email-already-in-use') || c.includes('credential-already-in-use')) return 'That email already has an account. Tap Log in.';
-  if (c.includes('invalid-email')) return 'That email looks off';
-  if (c.includes('weak-password')) return 'Password needs at least 6 characters';
-  if (c.includes('wrong-password') || c.includes('invalid-credential') || c.includes('user-not-found') || c.includes('invalid-login')) return 'Wrong email or password';
+  if (c.includes('popup-blocked')) return 'Allow pop-ups, or use your phone instead';
+  if (c.includes('credential-already-in-use')) return 'That number already has an account, so you are signed in to it.';
+  if (c.includes('invalid-phone-number') || c.includes('missing-phone-number')) return 'That number looks off. Include the area code.';
+  if (c.includes('invalid-verification-code') || c.includes('invalid-verification')) return "That code didn't match. Check the text and try again.";
+  if (c.includes('code-expired') || c.includes('session-expired') || c.includes('no pending')) return 'That code expired. Text yourself a new one.';
+  if (c.includes('captcha-check-failed') || c.includes('invalid-app-credential')) return "Couldn't confirm it's you. Try again.";
+  if (c.includes('quota-exceeded')) return 'Too many texts today. Try again tomorrow.';
   if (c.includes('too-many-requests')) return 'Too many tries. Wait a minute.';
   if (c.includes('operation-not-allowed')) return "That sign-in method isn't turned on yet";
   return 'Sign-in failed. Try again.';
 }
 
-async function doAuth(fn) {
+// A phone-number helper: 10 digits are assumed to be a US number.
+function toE164(raw) {
+  const t = String(raw || '').trim();
+  const d = t.replace(/\D/g, '');
+  if (t.startsWith('+') && d.length >= 8 && d.length <= 15) return '+' + d;
+  if (d.length === 10) return '+1' + d;
+  if (d.length === 11 && d.startsWith('1')) return '+' + d;
+  return '';
+}
+
+async function doAuth(fn, opts = {}) {
   if (ui.authBusy) return;
   ui.authBusy = true; render();
   try {
     const r = await fn();
+    if (opts.keepForm) { showError('Texted! Type the code we sent.'); return; }
     if (r && r.switched) {
       // A different account: start fresh with its saved player.
       ui.store.removeItem('freeze:profile');
@@ -602,7 +652,7 @@ async function doAuth(fn) {
     }
     // Guest upgraded in place: same player, now saved to the account.
     await ui.backend.saveProfile(ui.me, { ...profileForRoom(), layout: ui.profile.layout });
-    ui.form = { email: '', pw: '' };
+    ui.form = { phone: '', code: '' }; ui.phoneSent = false;
     showError('Saved! Your player is now on your account.');
   } catch (e) { console.error(e); showError(authMessage(e)); }
   finally { ui.authBusy = false; render(); }
@@ -620,9 +670,10 @@ function renderSheet() {
       <li>Wrong match, or trying to stack a <b>third</b> card of the same rank? You keep your card and <b>draw 1</b>.</li>
       <li>After drawing, swap it for one of your cards (no peeking) or discard it. A taken discard must be swapped in.</li>
       <li><b>7</b>: look at one of yours. <b>8</b>: look at a rival's. <b>10</b>: pick one of yours and one of a rival's and swap them, blind. Powers only work when drawn from the deck.</li>
-      <li>Think you're low? <b>Call Freeze</b> before you draw, or right after your move (before your turn ends). Everyone else gets one last turn, then all cards flip.</li>
+      <li>Think you're low? <b>Call Freeze</b> before you draw, or from the pop-up after your move. Every hand is revealed and the round ends right away. No last turns.</li>
+      <li>Ran out of time? The game makes a simple move for you. The timer is set by the host.</li>
       <li>Values: A = 1, 2–10 = face, J/Q = 10, <b>black K = −2</b>, <b>red K = 0</b>.</li>
-      <li><b>Rounds</b> mode: first to win the majority takes it. <b>Points</b> mode: totals add up, hit the limit and you're out.</li>
+      <li><b>Rounds</b> mode: first to win the majority takes it. <b>Points</b> mode: the round winner's hand adds nothing to the scoreboard. Everyone else's hand is added, and you're out at the limit.</li>
     </ul>
     <button type="button" class="btn primary wide" data-act="closeSheet">Got it</button>`;
   } else if (ui.sheet === 'profile') {
@@ -746,7 +797,7 @@ function enterRoom(code) {
   if (ui.unsub) ui.unsub();
   ui.code = code;
   ui.st = null;
-  ui.fxKey = null;
+  ui.fxKey = null; ui.turnKey = null; ui.shownPlay = '';
   history.replaceState(null, '', '?room=' + code);
   let first = true;
   ui.unsub = ui.backend.subscribe(code, async (st) => {
@@ -788,6 +839,9 @@ function onState(st) {
       ui.backend.recordGame(ui.me, profileForRoom(), summary.won, summary).then(refreshStats).catch(console.error);
     }
   }
+  // Keep showing the last move of the previous turn until the next player finishes theirs.
+  const tk = `${st.round}|${st.turn}|${st.status}`;
+  if (tk !== ui.turnKey) { ui.turnKey = tk; ui.shownPlay = st.last ? st.last.text : ''; }
   fxFor(st);
   ui.st = st;
   render();
@@ -799,7 +853,7 @@ function onState(st) {
 function fxFor(st) {
   if (!window.freezeIntro || !st) return;
   let key = null, opts = null;
-  if (st.last && st.last.freeze && st.freezeBy) {
+  if (st.last && st.last.freeze) {
     key = 'f|' + st.last.t;
     opts = { title: 'FREEZE!', sub: `${G.nameOf(st, st.freezeBy)} called it`, hold: 2000 };
   } else if ((st.status === 'roundEnd' || st.status === 'over') && st.results) {
@@ -824,6 +878,37 @@ function leaveRoom() {
   refreshStats();
   render();
 }
+
+// ---------- Turn clock and the freeze / end turn pop-up ----------
+
+function clockText(end) {
+  const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
+
+function postPopup(st) {
+  return `<div class="postpop" role="dialog" aria-label="Your move is done">
+    <p class="pp-title">Good go?</p>
+    <p class="pp-sub">Call Freeze to end the round now, or end your turn.</p>
+    <button type="button" class="btn ice big" data-act="freeze">${SNOW.replace('<svg', '<svg width="22" height="22"')} Call Freeze</button>
+    <button type="button" class="btn primary big" data-act="pass">End turn</button>
+  </div>`;
+}
+
+let timeoutBusy = false;
+async function tickClock() {
+  const st = ui.st;
+  if (!st || !st.turnEnds || !ui.code) return;
+  document.querySelectorAll('.clock').forEach((el) => { el.textContent = clockText(st.turnEnds); });
+  if (st.status === 'playing' && Date.now() >= st.turnEnds && !timeoutBusy) {
+    timeoutBusy = true;
+    try {
+      await ui.backend.transact(ui.code, (cur) => (cur ? G.apply(cur, { type: 'timeout' }, ui.me, Date.now()) : undefined));
+    } catch (e) { /* someone already moved on */ }
+    setTimeout(() => { timeoutBusy = false; }, 1500);
+  }
+}
+setInterval(tickClock, 1000);
 
 // ---------- Computer players (solo games) ----------
 // Only the player's own browser runs the bots, one move at a time, through the same rules as everyone else.
@@ -937,19 +1022,20 @@ async function handle(actName, d) {
       render();
       return;
     case 'google': return doAuth(() => ui.backend.google());
-    case 'emailUp':
-    case 'emailIn': {
-      const email = ui.form.email.trim();
-      const pw = ui.form.pw;
-      if (!email || !pw) { showError('Enter your email and a password'); return; }
-      return doAuth(() => (actName === 'emailUp' ? ui.backend.emailSignUp(email, pw) : ui.backend.emailSignIn(email, pw)));
+    case 'phoneSend': {
+      if (ui.backend.demo) { showError('Phone sign-in works on the live site'); return; }
+      const number = toE164(ui.form.phone);
+      if (!number) { showError('Type your phone number with the area code'); return; }
+      ui.form.phone = number;
+      return doAuth(async () => { await ui.backend.phoneSend(number); ui.phoneSent = true; return { sent: true }; }, { keepForm: true });
     }
-    case 'resetPw': {
-      const email = ui.form.email.trim();
-      if (!email) { showError('Type your email first'); return; }
-      try { await ui.backend.resetPassword(email); showError('Check your email for a reset link'); } catch (e) { showError(authMessage(e)); }
-      return;
+    case 'phoneVerify': {
+      const code = ui.form.code.replace(/\D/g, '');
+      if (code.length !== 6) { showError('Type the 6-digit code'); return; }
+      return doAuth(() => ui.backend.phoneConfirm(code));
     }
+    case 'phoneReset':
+      ui.phoneSent = false; ui.form.code = ''; render(); return;
     case 'signOut':
       try { await ui.backend.signOut(); } catch (e) { console.error(e); }
       ui.store.removeItem('freeze:profile');
@@ -979,6 +1065,7 @@ async function handle(actName, d) {
     }
     case 'mode': return act({ type: 'settings', settings: { ...st.settings, mode: d.mode } });
     case 'practice': return act({ type: 'settings', settings: { ...st.settings, practice: !st.settings.practice } });
+    case 'timer': return act({ type: 'settings', settings: { ...st.settings, turnSecs: Number(d.v) } });
     case 'bestof': return act({ type: 'settings', settings: { ...st.settings, mode: 'rounds', bestOf: Number(d.n) } });
     case 'limit': return act({ type: 'settings', settings: { ...st.settings, mode: 'points', limit: st.settings.limit + Number(d.d) } });
     case 'start': return act({ type: 'start' });
@@ -1028,7 +1115,7 @@ $app.addEventListener('click', (e) => {
 });
 $app.addEventListener('input', (e) => {
   const id = e.target.id;
-  if (id === 'email' || id === 'pw') ui.form[id] = e.target.value;
+  if (id === 'phone' || id === 'code') ui.form[id] = e.target.value;
   if (id === 'name' && ui.draft) ui.draft.name = e.target.value;
 });
 $app.addEventListener('keydown', (e) => {

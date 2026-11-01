@@ -62,7 +62,7 @@ export function createRoom(code, host, now = Date.now()) {
     code,
     hostId: host.id,
     status: 'lobby',
-    settings: { mode: 'rounds', bestOf: 3, limit: 100 },
+    settings: { mode: 'rounds', bestOf: 3, limit: 100, turnSecs: 60 },
     players: [{ id: host.id, ...cleanProfile(host) }],
     round: 0, wins: {}, scores: {}, out: {},
     last: { text: 'Room created', t: now },
@@ -95,6 +95,7 @@ export function setSettings(st, by, s) {
     mode: s.mode === 'points' ? 'points' : 'rounds',
     bestOf: Number(s.bestOf) === 5 ? 5 : 3,
     practice: !!s.practice, // practice games don't count toward wins, scores or stats
+    turnSecs: [0, 30, 60, 120].includes(Number(s.turnSecs)) ? Number(s.turnSecs) : 60, // 0 = no timer
     limit: Math.max(25, Math.min(500, Math.round(Number(s.limit) || 100))),
   };
   return st;
@@ -121,7 +122,8 @@ export function startRound(st, rng = Math.random, now = Date.now()) {
     status: 'peek', seats, deck, hands, discard: [], ready: {},
     turn: (st.round - 1) % seats.length, phase: 'choose',
     drawn: null, from: null, freezeBy: null, finalLeft: 0,
-    reveal: null, results: null, champions: null,
+    reveal: null, results: null, champions: null, turnEnds: null,
+    sitOut: [], forcedWinner: null,
   });
   st.last = { text: `Round ${st.round}: peek at 2 cards`, t: now };
   return st;
@@ -134,6 +136,7 @@ export function markReady(st, id, now = Date.now()) {
   if (st.seats.every((s) => st.ready[s])) {
     st.status = 'playing';
     st.phase = 'choose';
+    startClock(st, now);
     st.last = { text: `${nameOf(st, currentId(st))} goes first`, t: now };
   }
   return st;
@@ -177,10 +180,16 @@ function drawFromDeck(st) {
   return st.deck.length ? st.deck.pop() : null;
 }
 
-function advance(st) {
+function startClock(st, now) {
+  const secs = (st.settings && st.settings.turnSecs) || 0;
+  st.turnEnds = secs ? now + secs * 1000 : null;
+}
+
+function advance(st, now = Date.now()) {
   st.turn = (st.turn + 1) % st.seats.length;
   st.phase = 'choose';
   st.drawn = null; st.from = null; st.reveal = null;
+  startClock(st, now);
 }
 
 // After a move, the player may call Freeze (or end the turn) before play passes on.
@@ -192,7 +201,6 @@ function afterMove(st, now) {
 
 export function pass(st, id, now = Date.now()) {
   requireTurn(st, id, 'post');
-  st.last = { text: `${nameOf(st, id)} ends their turn`, t: now };
   return endTurn(st, now);
 }
 
@@ -202,7 +210,7 @@ function endTurn(st, now) {
     st.finalLeft -= 1;
     if (st.finalLeft <= 0) return endRound(st, now);
   }
-  advance(st);
+  advance(st, now);
   return st;
 }
 
@@ -330,14 +338,58 @@ export function topRun(st) {
   return n;
 }
 
+// Calling Freeze reveals every hand. Rounds mode: a caller with the lowest hand (4 or less) wins.
+// If they don't, a two-player game gives the round to the opponent, and with more players the
+// caller sits out the rest of the round while play goes on. Points mode scores the round as usual.
 export function callFreeze(st, id, now = Date.now()) {
   requireTurn(st, id, ['choose', 'post']);
-  if (st.freezeBy) fail('Freeze was already called');
   st.freezeBy = id;
-  st.finalLeft = st.seats.length - 1;
-  st.last = { text: `${nameOf(st, id)} called FREEZE! One last turn each`, t: now, freeze: true };
-  if (st.finalLeft <= 0) return endRound(st, now);
-  advance(st);
+  const totals = {};
+  for (const x of st.seats) totals[x] = handTotal(st.hands[x]);
+  const low = Math.min(...st.seats.map((x) => totals[x]));
+  const failed = st.settings.mode === 'rounds'
+    ? !(totals[id] <= WIN_TOTAL && totals[id] === low)
+    : totals[id] !== low; // points: the lowest hand wins the round
+  if (failed && st.seats.length === 2) {
+    const opp = st.seats.find((x) => x !== id);
+    st.forcedWinner = opp;
+    endRound(st, now);
+    st.last = { text: `${nameOf(st, id)} called FREEZE and didn't have the lowest. ${nameOf(st, opp)} wins the round`, t: now, freeze: true };
+    return st;
+  }
+  if (failed) {
+    const idx = st.seats.indexOf(id);
+    st.sitOut = (st.sitOut || []).concat(id);
+    st.seats = st.seats.filter((x) => x !== id);
+    st.turn = idx % st.seats.length; // the next player in line takes this turn
+    st.freezeBy = null;
+    st.phase = 'choose'; st.drawn = null; st.from = null; st.reveal = null;
+    startClock(st, now);
+    st.last = { text: `${nameOf(st, id)} called FREEZE and didn't have the lowest. They sit out. Their cards are revealed`, t: now, freeze: true };
+    return st;
+  }
+  endRound(st, now);
+  st.last = { text: `${nameOf(st, id)} called FREEZE! ${st.last.text}`, t: now, freeze: true };
+  return st;
+}
+
+// A player who runs out of time gets a simple automatic move, so the game never stalls.
+export function timeout(st, by, now = Date.now()) {
+  if (st.status !== 'playing') fail('The game is not in play');
+  if (!st.turnEnds || now < st.turnEnds) fail('Not out of time yet');
+  const id = currentId(st);
+  for (let i = 0; i < 5 && st.status === 'playing' && currentId(st) === id; i++) {
+    const ph = st.phase;
+    if (ph === 'choose') draw(st, id, now);
+    else if (ph === 'drawn') { if (st.from === 'deck') discardDrawn(st, id, now); else swapIn(st, id, 0, now); }
+    else if (ph === 'p7') peekOwn(st, id, 0, now);
+    else if (ph === 'p8') peekOther(st, id, st.seats.find((x) => x !== id && st.hands[x].length), 0, now);
+    else if (ph === 'p10') { const o = st.seats.find((x) => x !== id && st.hands[x].length); blindSwap(st, id, 0, o, 0, now); }
+    else if (ph === 'reveal') doneReveal(st, id, now);
+    else if (ph === 'post') pass(st, id, now);
+    else break;
+  }
+  if (st.status === 'playing' && currentId(st) !== id) st.last = { text: `${nameOf(st, id)} ran out of time`, t: now };
   return st;
 }
 
@@ -345,11 +397,17 @@ export function callFreeze(st, id, now = Date.now()) {
 
 export function endRound(st, now = Date.now()) {
   const totals = {};
-  for (const id of st.seats) totals[id] = handTotal(st.hands[id]);
+  const everyone = st.seats.concat(st.sitOut || []); // a player who sat out still has a hand to score
+  for (const id of everyone) totals[id] = handTotal(st.hands[id]);
+  const forced = st.forcedWinner; // set when a failed freeze hands the round to the opponent
+  st.forcedWinner = null;
   let winners = [];
   if (st.settings.mode === 'rounds') {
     const eligible = st.seats.filter((id) => totals[id] <= WIN_TOTAL);
-    if (eligible.length) {
+    if (forced) {
+      winners = [forced];
+      st.wins[forced] = (st.wins[forced] || 0) + 1;
+    } else if (eligible.length) {
       const m = Math.min(...eligible.map((id) => totals[id]));
       winners = eligible.filter((id) => totals[id] === m);
       for (const id of winners) st.wins[id] = (st.wins[id] || 0) + 1;
@@ -360,8 +418,9 @@ export function endRound(st, now = Date.now()) {
   } else {
     const m = Math.min(...st.seats.map((id) => totals[id]));
     winners = st.seats.filter((id) => totals[id] === m);
-    for (const id of st.seats) {
-      st.scores[id] = (st.scores[id] || 0) + totals[id];
+    if (forced) winners = [forced];
+    for (const id of everyone) {
+      st.scores[id] = (st.scores[id] || 0) + (winners.includes(id) ? 0 : totals[id]);
       if (st.scores[id] >= st.settings.limit) st.out[id] = true;
     }
     const alive = st.players.filter((p) => !st.out[p.id]).map((p) => p.id);
@@ -404,6 +463,7 @@ export function apply(st, a, by, now = Date.now(), rng = Math.random) {
     case 'match': return match(st, by, a.idx, now);
     case 'freeze': return callFreeze(st, by, now);
     case 'pass': return pass(st, by, now);
+    case 'timeout': return timeout(st, by, now);
     case 'next': return nextRound(st, by, rng, now);
     case 'newGame': return newGame(st, by, now);
     default: fail('Unknown action');
