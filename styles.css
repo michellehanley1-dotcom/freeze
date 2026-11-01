@@ -79,11 +79,10 @@ button.card { cursor: pointer; }
 .card.red .cv { background: var(--red); }
 .card.sm .cv { display: none; }
 .card.sm .cs { font-size: 1.9em; }
-.card.down { background: repeating-linear-gradient(45deg, #1A2230 0 5px, #1F2939 5px 10px); border: 1px solid #2E3A4D; box-shadow: 0 8px 18px rgba(0,0,0,0.45); padding: 0.3em; }
-.card.sm.down { padding: 2px; border-color: rgba(242,181,68,0.45); }
-.card .bk { flex: 1; border: 1px solid rgba(242,181,68,0.5); border-radius: 0.35em; display: flex; align-items: center; justify-content: center; color: var(--accent); }
+.card.down { background: #1B4A7C; border: 1px solid #0A2240; box-shadow: 0 8px 18px rgba(0,0,0,0.45); padding: 0.3em; }
+.card.sm.down { padding: 2px; }
+.card .bk { flex: 1; border: 2px solid rgba(234,248,255,0.85); border-radius: 0.35em; background-color: #1B4A7C; background-image: repeating-linear-gradient(45deg, transparent 0 5px, rgba(154,223,255,0.45) 5px 6px), repeating-linear-gradient(-45deg, transparent 0 5px, rgba(154,223,255,0.45) 5px 6px); }
 .card.sm .bk { border: 0; }
-.card .bk svg { width: 55%; height: auto; max-width: 30px; }
 .card.tap { outline: 2px dashed rgba(242,181,68,0.7); outline-offset: 2px; }
 .card.tap:active { transform: scale(0.95); }
 .card.sel { outline: 3px solid var(--accent); outline-offset: 3px; transform: translateY(-6px); }
@@ -164,11 +163,11 @@ button.card { cursor: pointer; }
 .topbar .goal { font-family: var(--display); font-weight: 800; font-size: 17px; }
 .topbar .goal b { color: var(--accent); }
 .felt { position: relative; flex: 1; min-height: 400px; margin: 8px 10px 0; border-radius: 120px / 110px; border: 10px solid var(--rail); background: var(--felt); box-shadow: inset 0 0 0 2px var(--felt-line), inset 0 0 60px rgba(0,0,0,0.45), 0 24px 60px rgba(0,0,0,0.6); display: flex; flex-direction: column; }
-.seats { position: relative; flex: 1 1 auto; min-height: 175px; }
-.seat { position: absolute; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 5px; width: 108px; }
-.seat .minis { display: flex; gap: 3px; justify-content: center; }
+.seats { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 0; }
+.seat { display: flex; align-items: center; gap: 10px; }
+.seat .minis { display: flex; flex-wrap: nowrap; gap: 5px; }
 .seat .minis.wide { grid-template-columns: repeat(3, 26px); }
-.seat .who { display: flex; align-items: center; gap: 5px; max-width: 100px; }
+.seat .who { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 72px; flex-shrink: 0; }
 .seat .who .nm { font-size: 12px; font-weight: 700; background: var(--bg); border: 1px solid #2C3A33; padding: 3px 8px; border-radius: 999px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 76px; }
 .seat.active .avatar { animation: pulse 1.4s infinite; border-color: var(--accent); }
 .seat.active .nm { border-color: var(--accent); }
@@ -178,16 +177,16 @@ button.card { cursor: pointer; }
 .toast .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex-shrink: 0; }
 .toast.freeze { border-color: var(--ice); color: var(--ice); }
 .toast.freeze .dot { background: var(--ice); }
-.center { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 6px 0 4px; }
+.center { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; gap: 36px; padding: 10px 0; }
 .pile { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: 0; padding: 0; cursor: default; }
 button.pile { cursor: pointer; }
 .pile .plbl { font-size: 11px; color: #C9E3D6; }
 .stack { position: relative; width: 58px; height: 82px; }
-.stack::before, .stack::after { content: ''; position: absolute; width: 58px; height: 82px; border-radius: 0.6em; background: #141B26; border: 1px solid #2E3A4D; }
-.stack::before { left: 4px; top: 4px; } .stack::after { left: 2px; top: 2px; background: #172030; }
+.stack::before, .stack::after { content: ''; position: absolute; width: 58px; height: 82px; border-radius: 0.6em; background: #163A62; border: 1px solid #0A2240; }
+.stack::before { left: 4px; top: 4px; } .stack::after { left: 2px; top: 2px; background: #1B4A7C; }
 .stack .card { position: absolute; left: 0; top: 0; z-index: 1; }
 .emptyslot { width: 58px; height: 82px; border-radius: 9px; border: 1.5px dashed rgba(201,227,214,0.35); }
-.held { display: flex; flex-direction: column; align-items: center; gap: 6px; animation: drop .25s ease-out; }
+.held { display: flex; flex-direction: column; align-items: center; gap: 6px; padding-bottom: 6px; animation: drop .25s ease-out; }
 .held .plbl { font-size: 11px; color: #C9E3D6; letter-spacing: 0.1em; text-transform: uppercase; }
 .myhand { padding: 10px 18px 14px; }
 .mine-label { text-align: center; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #C9E3D6; margin-top: -6px; padding-bottom: 10px; }
@@ -266,8 +265,8 @@ button.pile { cursor: pointer; }
 }
 
 /* Card position numbers (1-4), so you can name a card when you steal one */
-.card .pos { position: absolute; top: 3px; left: 5px; font-family: var(--body); font-size: 11px; font-weight: 700; line-height: 1; color: var(--accent); z-index: 2; }
-.card.up .pos { color: var(--black); opacity: .75; }
+.card .pos { position: absolute; top: 3px; left: 4px; font-family: var(--body); font-size: 12px; font-weight: 700; line-height: 1; color: var(--accent); z-index: 2; background: rgba(6,13,26,0.85); border-radius: 4px; padding: 2px 4px; }
+.card.up .pos { color: var(--black); opacity: .75; background: none; padding: 0; }
 .card.sm .pos { font-size: 8px; top: 2px; left: 3px; }
 .card.pk .pos { font-size: 12px; }
 .seat .minis .card.sm { width: 23px; height: 34px; }
@@ -290,11 +289,6 @@ button.pile { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { #freeze-intro .edge-frost { animation-duration: .2s; } }
 
 /* Table: bigger rival cards, freeze / end turn pop-up, turn clock, "You drew" line */
-.seat { width: 136px; }
-.seat .minis { gap: 4px; }
-.seat .minis .card.sm { width: 30px; height: 44px; font-size: 10px; }
-.seat .minis .card.sm .cs { font-size: 2.2em; }
-.seat .minis .card.sm .pos { font-size: 9px; }
 .clock { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
 .drawline { text-align: center; font-size: 15px; color: var(--soft); min-height: 22px; margin-top: 6px; }
 .drawline b { color: var(--text); }
@@ -308,3 +302,14 @@ button.pile { cursor: pointer; }
 .postpop .pp-sub { margin: 0; font-size: 14px; color: var(--soft); text-align: center; }
 .postpop .btn.big { height: 60px; font-size: 18px; width: 100%; }
 @keyframes popIn { from { opacity: 0; transform: translate(-50%, -46%) scale(.94); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+
+/* Opponent cards: big enough to read the order; numbers sit on a dark tab */
+.card.op { width: 53px; height: 76px; font-size: 10px; border-radius: 0.5em; padding: 0.3em 0.35em; }
+.card.op .cs { font-size: 1.9em; }
+.card.op .cr { font-size: 1.1em; }
+.card.op .pos { top: 3px; left: 3px; font-size: 13px; padding: 1px 4px; border-radius: 4px; background: rgba(6,13,26,0.85); color: #F2B544; }
+.card.op.up .pos { background: rgba(6,13,26,0.85); color: #F2B544; opacity: 1; }
+.card.op.down { padding: 0.25em; }
+.card.op.tap { outline-offset: 2px; }
+
+.center .toast { top: 4px; bottom: auto; }

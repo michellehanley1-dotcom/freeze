@@ -224,7 +224,7 @@ function card(c, o = {}) {
   const pos = o.num ? `<span class="pos">${o.num}</span>` : '';
   const inner = up
     ? `${pos}<span class="cr">${esc(G.rankOf(c))}<i>${G.SUIT_SYMBOL[G.suitOf(c)]}</i></span><span class="cs">${G.SUIT_SYMBOL[G.suitOf(c)]}</span><span class="cv">${G.value(c)}</span>`
-    : `${pos}<span class="bk">${SNOW}</span>`;
+    : `${pos}<span class="bk"></span>`;
   const aria = up ? cardName(c) : (o.aria || 'Face-down card');
   if (!o.act) return `<div class="${cls}" role="img" aria-label="${esc(aria)}">${inner}</div>`;
   const data = Object.entries(o.data || {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ');
@@ -395,13 +395,6 @@ function renderSpectator(st, msg) {
     <h1 class="title" style="font-size:36px">Hang tight</h1><p class="sub">${esc(msg)}</p></section>`;
 }
 
-function seatPos(i, k) {
-  if (k === 1) return [50, 2];
-  const [from, to] = k === 2 ? [145, 35] : k === 3 ? [160, 20] : [168, 12];
-  const a = ((from - ((from - to) * i) / (k - 1)) * Math.PI) / 180;
-  return [50 + 40 * Math.cos(a), 2 + 46 * (1 - Math.sin(a))];
-}
-
 function renderTable(st) {
   const me = ui.me;
   const cur = G.currentId(st);
@@ -418,19 +411,18 @@ function renderTable(st) {
   const isFlash = (id, i) => st.last && st.last.t > Date.now() - 4000 && fl.some((f) => f.id === id && f.i === i);
 
   const pickTheirs = myTurn && (ph === 'p8' || (ph === 'p10' && ui.sel !== null));
-  const seats = others.map((id, k) => {
-    const [x, y] = seatPos(k, others.length);
+  const seats = others.map((id) => {
     const h = st.hands[id] || [];
     const minis = h.map((c, i) => card(c, {
-      size: 'sm',
+      size: 'op',
       up: (st.sitOut || []).includes(id) || (rv && rv.by === me && rv.owner === id && rv.idx === i),
       act: pickTheirs && 'theirs', data: { o: id, i },
       flash: isFlash(id, i), aria: `${G.nameOf(st, id)}'s card ${i + 1}`, num: i + 1,
     })).join('');
     const tag = st.freezeBy === id ? `<span class="tag">${SNOW.replace('<svg', '<svg width="11" height="11"')}Froze</span>` : (st.sitOut || []).includes(id) ? '<span class="tag">Sat out</span>' : '';
-    return `<div class="seat ${cur === id ? 'active' : ''}" style="left:${x}%;top:${y}%">
+    return `<div class="seat ${cur === id ? 'active' : ''}">
+      <div class="who">${avatar(st, id, 28)}<span class="nm">${esc(G.nameOf(st, id))}</span>${tag}</div>
       <div class="minis">${minis}</div>
-      <div class="who">${avatar(st, id, 28)}<span class="nm">${esc(G.nameOf(st, id))}</span></div>${tag}
     </div>`;
   }).join('');
 
@@ -478,8 +470,8 @@ function renderTable(st) {
       </div>
     </div>
     <div class="felt">
-      <div class="seats">${seats}${toast}</div>
-      <div class="center">${drawPile}${held}${discardPile}</div>${drawLine}
+      <div class="seats">${seats}</div>
+      <div class="center">${toast}${drawPile}${discardPile}</div>${held}${drawLine}
       <div class="myhand ${handClass()}">${myCards || (seated ? '<span class="mine-label">No cards left!</span>' : '<span class="mine-label">You are out. Watching this round.</span>')}</div>
       ${seated ? `<div class="mine-label">${myTurn ? 'Your turn' : 'Your hand'}</div>` : ''}
       ${myTurn && ph === 'post' ? postPopup(st) : ''}
