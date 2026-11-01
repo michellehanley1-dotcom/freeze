@@ -231,7 +231,7 @@ export function swapIn(st, id, idx, now = Date.now()) {
   const old = h[idx];
   h[idx] = st.drawn;
   st.discard.push(old);
-  st.last = { text: `${nameOf(st, id)} swapped a card, threw ${label(old)}`, t: now, flash: { id, i: idx } };
+  st.last = { text: `${nameOf(st, id)} swapped card ${idx + 1}, threw ${label(old)}`, t: now, flash: { id, i: idx } };
   return afterMove(st, now);
 }
 
@@ -272,7 +272,7 @@ export function peekOther(st, id, owner, idx, now = Date.now()) {
   pickIndex(st.hands[owner], idx);
   st.reveal = { by: id, owner, idx };
   st.phase = 'reveal';
-  st.last = { text: `${nameOf(st, id)} is peeking at ${nameOf(st, owner)}'s card`, t: now, flash: { id: owner, i: idx } };
+  st.last = { text: `${nameOf(st, id)} is peeking at ${nameOf(st, owner)}'s card ${idx + 1}`, t: now, flash: { id: owner, i: idx } };
   return st;
 }
 
@@ -288,7 +288,7 @@ export function blindSwap(st, id, myIdx, owner, theirIdx, now = Date.now()) {
   pickIndex(a, myIdx); pickIndex(b, theirIdx);
   [a[myIdx], b[theirIdx]] = [b[theirIdx], a[myIdx]];
   st.last = {
-    text: `${nameOf(st, id)} swapped a card with ${nameOf(st, owner)}`, t: now,
+    text: `${nameOf(st, id)} swapped card ${myIdx + 1} with ${nameOf(st, owner)}'s card ${theirIdx + 1}`, t: now,
     flash: { id: owner, i: theirIdx }, flash2: { id, i: myIdx },
   };
   return afterMove(st, now);
