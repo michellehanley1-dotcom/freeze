@@ -85,6 +85,11 @@ export function decide(st, id) {
       if (!target) { const o = randomOf(rivalsWithCards(st, id)); target = { o, i: Math.floor(Math.random() * st.hands[o].length) }; }
       return { type: 'blindSwap', idx: Math.max(0, wi), owner: target.o, theirIdx: target.i };
     }
+    case 'post': {
+      // After a move: call freeze if the hand is clearly low, otherwise end the turn.
+      const want = !st.freezeBy && unknown === 0 && est <= (hard ? 4 : 3);
+      return want ? { type: 'freeze' } : { type: 'pass' };
+    }
     case 'reveal': return { type: 'done' };
     default: return null;
   }
@@ -118,7 +123,8 @@ export function fallback(st, id) {
     case 'p7': return { type: 'peekOwn', idx: 0 };
     case 'p8': { const o = rivalsWithCards(st, id)[0]; return { type: 'peekOther', owner: o, idx: 0 }; }
     case 'p10': { const o = rivalsWithCards(st, id)[0]; return { type: 'blindSwap', idx: 0, owner: o, theirIdx: 0 }; }
+    case 'post': return { type: 'pass' };
     case 'reveal': return { type: 'done' };
-    default: return hand.length ? null : null;
+    default: return null;
   }
 }

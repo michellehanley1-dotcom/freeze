@@ -94,6 +94,7 @@ export function setSettings(st, by, s) {
   st.settings = {
     mode: s.mode === 'points' ? 'points' : 'rounds',
     bestOf: Number(s.bestOf) === 5 ? 5 : 3,
+    practice: !!s.practice, // practice games don't count toward wins, scores or stats
     limit: Math.max(25, Math.min(500, Math.round(Number(s.limit) || 100))),
   };
   return st;
@@ -182,6 +183,19 @@ function advance(st) {
   st.drawn = null; st.from = null; st.reveal = null;
 }
 
+// After a move, the player may call Freeze (or end the turn) before play passes on.
+function afterMove(st, now) {
+  st.drawn = null; st.from = null; st.reveal = null;
+  st.phase = 'post';
+  return st;
+}
+
+export function pass(st, id, now = Date.now()) {
+  requireTurn(st, id, 'post');
+  st.last = { text: `${nameOf(st, id)} ends their turn`, t: now };
+  return endTurn(st, now);
+}
+
 function endTurn(st, now) {
   st.drawn = null; st.from = null; st.reveal = null;
   if (st.freezeBy) {
@@ -218,7 +232,7 @@ export function swapIn(st, id, idx, now = Date.now()) {
   h[idx] = st.drawn;
   st.discard.push(old);
   st.last = { text: `${nameOf(st, id)} swapped a card, threw ${label(old)}`, t: now, flash: { id, i: idx } };
-  return endTurn(st, now);
+  return afterMove(st, now);
 }
 
 export function discardDrawn(st, id, now = Date.now()) {
@@ -226,7 +240,7 @@ export function discardDrawn(st, id, now = Date.now()) {
   if (st.from !== 'deck') fail('A card taken from the discard pile has to be swapped in');
   st.discard.push(st.drawn);
   st.last = { text: `${nameOf(st, id)} threw ${label(st.drawn)}`, t: now };
-  return endTurn(st, now);
+  return afterMove(st, now);
 }
 
 export function usePower(st, id, now = Date.now()) {
@@ -264,7 +278,7 @@ export function peekOther(st, id, owner, idx, now = Date.now()) {
 
 export function doneReveal(st, id, now = Date.now()) {
   requireTurn(st, id, 'reveal');
-  return endTurn(st, now);
+  return afterMove(st, now);
 }
 
 export function blindSwap(st, id, myIdx, owner, theirIdx, now = Date.now()) {
@@ -277,7 +291,7 @@ export function blindSwap(st, id, myIdx, owner, theirIdx, now = Date.now()) {
     text: `${nameOf(st, id)} swapped a card with ${nameOf(st, owner)}`, t: now,
     flash: { id: owner, i: theirIdx }, flash2: { id, i: myIdx },
   };
-  return endTurn(st, now);
+  return afterMove(st, now);
 }
 
 export function match(st, id, idx, now = Date.now()) {
@@ -303,7 +317,7 @@ export function match(st, id, idx, now = Date.now()) {
       t: now,
     };
   }
-  return endTurn(st, now);
+  return afterMove(st, now);
 }
 
 // How many cards of the same rank sit on top of the discard pile.
@@ -317,7 +331,7 @@ export function topRun(st) {
 }
 
 export function callFreeze(st, id, now = Date.now()) {
-  requireTurn(st, id, 'choose');
+  requireTurn(st, id, ['choose', 'post']);
   if (st.freezeBy) fail('Freeze was already called');
   st.freezeBy = id;
   st.finalLeft = st.seats.length - 1;
@@ -389,6 +403,7 @@ export function apply(st, a, by, now = Date.now(), rng = Math.random) {
     case 'blindSwap': return blindSwap(st, by, a.idx, a.owner, a.theirIdx, now);
     case 'match': return match(st, by, a.idx, now);
     case 'freeze': return callFreeze(st, by, now);
+    case 'pass': return pass(st, by, now);
     case 'next': return nextRound(st, by, rng, now);
     case 'newGame': return newGame(st, by, now);
     default: fail('Unknown action');

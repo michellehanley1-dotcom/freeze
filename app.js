@@ -147,7 +147,7 @@ const ICONS = ['\u{1F436}', '\u{1F431}', '\u{1F98A}', '\u{1F43C}', '\u{1F438}', 
 
 const ui = {
   backend: null, me: null, code: null, st: null, unsub: null, store: localStorage,
-  profile: { name: '', icon: ICONS[19], color: 0, layout: 'grid' },
+  profile: { name: '', icon: ICONS[19], color: 0, layout: 'row' },
   draft: null, sheet: null, boardTab: 'game', board: null, myStats: null, games: null,
   form: { email: '', pw: '' }, authBusy: false,
   mode: null, sel: null, opening: [], phaseKey: '', toastT: 0,
@@ -195,9 +195,10 @@ function card(c, o = {}) {
   const up = o.up && c;
   const cls = ['card', o.size || 'md', up ? 'up' : 'down', up && G.isRed(c) ? 'red' : '',
     o.act ? 'tap' : '', o.sel ? 'sel' : '', o.glow ? 'glow' : '', o.flash ? 'flash' : '', o.cls || ''].join(' ');
+  const pos = o.num ? `<span class="pos">${o.num}</span>` : '';
   const inner = up
-    ? `<span class="cr">${esc(G.rankOf(c))}<i>${G.SUIT_SYMBOL[G.suitOf(c)]}</i></span><span class="cs">${G.SUIT_SYMBOL[G.suitOf(c)]}</span><span class="cv">${G.value(c)}</span>`
-    : `<span class="bk">${SNOW}</span>`;
+    ? `${pos}<span class="cr">${esc(G.rankOf(c))}<i>${G.SUIT_SYMBOL[G.suitOf(c)]}</i></span><span class="cs">${G.SUIT_SYMBOL[G.suitOf(c)]}</span><span class="cv">${G.value(c)}</span>`
+    : `${pos}<span class="bk">${SNOW}</span>`;
   const aria = up ? cardName(c) : (o.aria || 'Face-down card');
   if (!o.act) return `<div class="${cls}" role="img" aria-label="${esc(aria)}">${inner}</div>`;
   const data = Object.entries(o.data || {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ');
@@ -220,12 +221,7 @@ function profileFields(d, withLayout) {
       <div class="grow" style="display:flex;flex-direction:column;gap:6px"><label class="lbl" for="name">Your name</label>
       <input id="name" class="field" maxlength="14" autocomplete="nickname" placeholder="Name" value="${esc(d.name)}"></div></div>
     <span class="lbl">Pick your icon</span><div class="icongrid">${icons}</div>
-    <span class="lbl">Pick your color</span><div class="colorrow">${colors}</div>
-    ${withLayout ? `<span class="lbl">Show my cards</span>
-    <div class="seg">
-      <button type="button" class="btn small ${d.layout === 'grid' ? 'on' : ''}" data-act="pickLayout" data-v="grid" aria-pressed="${d.layout === 'grid'}">${ICON.grid} 2 × 2</button>
-      <button type="button" class="btn small ${d.layout === 'row' ? 'on' : ''}" data-act="pickLayout" data-v="row" aria-pressed="${d.layout === 'row'}">${ICON.row} In a row</button>
-    </div>` : ''}`;
+    <span class="lbl">Pick your color</span><div class="colorrow">${colors}</div>`;
 }
 
 // ---------- Screens ----------
@@ -320,6 +316,9 @@ function renderLobby(st) {
     <div class="panel">
       <span class="eyebrow">${host ? 'How are we playing?' : 'Game settings (host picks)'}</span>
       ${modes}
+      <div class="mode ${s.practice ? 'on' : ''}">
+        <button type="button" class="head" data-act="practice" ${dis} aria-pressed="${!!s.practice}"><span class="radio"></span><span><span class="mt">Practice game</span><span class="md">Plays normally, but doesn't count for wins, points or the leaderboard.</span></span></button>
+      </div>
     </div>
     ${ui.backend.demo ? `<p class="banner">Demo mode: open this link in another tab to add a player.</p>` : ''}
     <div style="margin-top:auto;display:flex;flex-direction:column;gap:10px">
@@ -330,23 +329,22 @@ function renderLobby(st) {
   </section>`;
 }
 
-function handClass() { return ui.profile.layout === 'row' ? 'hand row' : 'hand grid'; }
+function handClass() { return 'hand row'; } // cards always sit in one row, numbered 1-4
 
 function renderPeek(st) {
   const hand = st.hands[ui.me];
   if (!hand) return renderSpectator(st, "Round in progress. You'll join the next game.");
   const ready = st.ready[ui.me];
   const need = Math.min(2, hand.length);
-  const size = ui.profile.layout === 'row' ? 'pk' : 'xl';
+  const size = 'pk';
   const cards = hand.map((c, i) => {
     const seen = !ready && ui.opening.includes(i);
     const canTap = !ready && !seen && ui.opening.length < need;
-    return card(c, { size, up: seen, act: canTap ? 'openPeek' : null, data: { i }, cls: seen ? 'mine-seen' : '', aria: `Your card ${i + 1}` });
+    return card(c, { size, up: seen, act: canTap ? 'openPeek' : null, data: { i }, cls: seen ? 'mine-seen' : '', aria: `Your card ${i + 1}`, num: i + 1 });
   }).join('');
   const waitingFor = st.seats.filter((id) => !st.ready[id]).map((id) => nm(st, id));
   return `<section class="screen">
-    <div class="row"><span class="eyebrow grow">Round ${st.round}</span>
-      <button type="button" class="icon-btn" data-act="toggleLayout" aria-label="Switch card layout">${ui.profile.layout === 'row' ? ICON.grid : ICON.row}</button></div>
+    <div class="row"><span class="eyebrow grow">Round ${st.round}</span></div>
     <div style="display:flex;flex-direction:column;gap:8px">
       <h1 class="title" style="font-size:40px">${ready ? 'Locked in.' : 'Memorize<br>two cards.'}</h1>
       <p class="sub">${ready ? 'Your cards are face down again, in this same order on the table.' : `Tap ${need === 2 ? 'two cards' : 'a card'} to look. They stay in this order on the table.`}</p>
@@ -393,7 +391,7 @@ function renderTable(st) {
       size: 'sm',
       up: rv && rv.by === me && rv.owner === id && rv.idx === i,
       act: pickTheirs && 'theirs', data: { o: id, i },
-      flash: isFlash(id, i), aria: `${G.nameOf(st, id)}'s card ${i + 1}`,
+      flash: isFlash(id, i), aria: `${G.nameOf(st, id)}'s card ${i + 1}`, num: i + 1,
     })).join('');
     const tag = st.freezeBy === id ? `<span class="tag">${SNOW.replace('<svg', '<svg width="11" height="11"')}Froze</span>` : '';
     return `<div class="seat ${cur === id ? 'active' : ''}" style="left:${x}%;top:${y}%">
@@ -423,11 +421,11 @@ function renderTable(st) {
   const myCards = hand.map((c, i) => card(c, {
     up: rv && rv.by === me && rv.owner === me && rv.idx === i,
     act: tapMine && 'mine', data: { i }, sel: ph === 'p10' && ui.sel === i,
-    flash: isFlash(me, i), aria: `Your card ${i + 1}`,
+    flash: isFlash(me, i), aria: `Your card ${i + 1}`, num: i + 1,
   })).join('');
 
   const s = st.settings;
-  const modeLine = s.mode === 'rounds' ? `Best of ${s.bestOf} · Round ${st.round}` : `Play to ${s.limit} · Round ${st.round}`;
+  const modeLine = (s.mode === 'rounds' ? `Best of ${s.bestOf} · Round ${st.round}` : `Play to ${s.limit} · Round ${st.round}`) + (s.practice ? ' · Practice' : '');
 
   return `<section class="game">
     <div class="topbar">
@@ -454,7 +452,7 @@ function actionBar(st, myTurn, top) {
   const fz = st.freezeBy ? `<div class="freezebar">${SNOW.replace('<svg', '<svg width="14" height="14"')} ${nm(st, st.freezeBy)} called Freeze · ${st.finalLeft} turn${st.finalLeft === 1 ? '' : 's'} left</div>` : '';
   if (!myTurn) {
     const who = `<b>${esc(G.nameOf(st, cur))}</b>`;
-    const doing = ph === 'drawn' ? `${who} is deciding what to do…` : ['p7', 'p8', 'p10', 'reveal'].includes(ph) ? `${who} is using a power card…` : `${who}'s turn`;
+    const doing = ph === 'post' ? `${who} is deciding whether to call Freeze…` : ph === 'drawn' ? `${who} is deciding what to do…` : ['p7', 'p8', 'p10', 'reveal'].includes(ph) ? `${who} is using a power card…` : `${who}'s turn`;
     return `${fz}<p class="waiting">${doing}</p>`;
   }
   const cancel = '<button type="button" class="btn" data-act="cancel">Cancel</button>';
@@ -480,6 +478,13 @@ function actionBar(st, myTurn, top) {
         <button type="button" class="btn ${power ? '' : 'primary'}" data-act="swapMode">Swap in</button>
         <button type="button" class="btn" data-act="discard">Discard</button>
         ${power ? '<button type="button" class="btn primary" data-act="power">Use power</button>' : ''}
+      </div>`;
+  }
+  if (ph === 'post') {
+    return `${fz}<p class="prompt">${st.freezeBy ? `Last turn. End it when you're done.` : 'Good go? Call Freeze now, or end your turn.'}</p>
+      <div class="btnrow">
+        ${st.freezeBy ? '' : `<button type="button" class="btn ice" data-act="freeze">${SNOW.replace('<svg', '<svg width="18" height="18"')} Call Freeze</button>`}
+        <button type="button" class="btn primary" data-act="pass">End turn</button>
       </div>`;
   }
   if (ph === 'p7') return `${fz}<p class="prompt">Tap one of <b>your</b> cards to look at it.</p>`;
@@ -615,7 +620,7 @@ function renderSheet() {
       <li>Wrong match, or trying to stack a <b>third</b> card of the same rank? You keep your card and <b>draw 1</b>.</li>
       <li>After drawing, swap it for one of your cards (no peeking) or discard it. A taken discard must be swapped in.</li>
       <li><b>7</b>: look at one of yours. <b>8</b>: look at a rival's. <b>10</b>: pick one of yours and one of a rival's and swap them, blind. Powers only work when drawn from the deck.</li>
-      <li>Think you're low? <b>Call Freeze</b> instead of drawing. Everyone else gets one last turn, then all cards flip.</li>
+      <li>Think you're low? <b>Call Freeze</b> before you draw, or right after your move (before your turn ends). Everyone else gets one last turn, then all cards flip.</li>
       <li>Values: A = 1, 2–10 = face, J/Q = 10, <b>black K = −2</b>, <b>red K = 0</b>.</li>
       <li><b>Rounds</b> mode: first to win the majority takes it. <b>Points</b> mode: totals add up, hit the limit and you're out.</li>
     </ul>
@@ -768,8 +773,8 @@ function onState(st) {
     if (st.status === 'playing' && G.currentId(st) === ui.me && st.phase === 'choose' && navigator.vibrate) navigator.vibrate(35);
     ui.phaseKey = key;
   }
-  // Count a finished game toward all-time stats, once per player per game. Solo games don't count.
-  if (st.status === 'over' && st.gameId && !st.solo && player(st, ui.me)) {
+  // Count a finished game toward all-time stats, once per player per game. Solo and practice games don't count.
+  if (st.status === 'over' && st.gameId && !st.solo && !st.settings.practice && player(st, ui.me)) {
     const k = 'freeze:rec:' + st.gameId;
     if (!ui.store.getItem(k)) {
       ui.store.setItem(k, '1');
@@ -973,6 +978,7 @@ async function handle(actName, d) {
       return;
     }
     case 'mode': return act({ type: 'settings', settings: { ...st.settings, mode: d.mode } });
+    case 'practice': return act({ type: 'settings', settings: { ...st.settings, practice: !st.settings.practice } });
     case 'bestof': return act({ type: 'settings', settings: { ...st.settings, mode: 'rounds', bestOf: Number(d.n) } });
     case 'limit': return act({ type: 'settings', settings: { ...st.settings, mode: 'points', limit: st.settings.limit + Number(d.d) } });
     case 'start': return act({ type: 'start' });
@@ -986,6 +992,7 @@ async function handle(actName, d) {
     case 'draw': return act({ type: 'draw' });
     case 'take': return act({ type: 'take' });
     case 'freeze': return act({ type: 'freeze' });
+    case 'pass': return act({ type: 'pass' });
     case 'matchMode': ui.mode = 'match'; render(); return;
     case 'swapMode': ui.mode = 'swap'; render(); return;
     case 'cancel': ui.mode = null; ui.sel = null; render(); return;

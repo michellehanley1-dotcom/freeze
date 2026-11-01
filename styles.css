@@ -120,7 +120,6 @@ button.card { cursor: pointer; }
 .stepper .val { min-width: 60px; text-align: center; font-family: var(--display); font-weight: 800; font-size: 26px; }
 
 /* ---------- Hands: 2x2 or one row (same order everywhere) ---------- */
-.hand.grid { display: grid; grid-template-columns: repeat(2, max-content); justify-content: center; gap: 8px 10px; }
 .hand.row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .hand.peek { margin-top: 6px; }
 .hand.peek.grid { gap: 18px; }
@@ -166,8 +165,8 @@ button.card { cursor: pointer; }
 .topbar .goal b { color: var(--accent); }
 .felt { position: relative; flex: 1; min-height: 400px; margin: 8px 10px 0; border-radius: 120px / 110px; border: 10px solid var(--rail); background: var(--felt); box-shadow: inset 0 0 0 2px var(--felt-line), inset 0 0 60px rgba(0,0,0,0.45), 0 24px 60px rgba(0,0,0,0.6); display: flex; flex-direction: column; }
 .seats { position: relative; flex: 1 1 auto; min-height: 175px; }
-.seat { position: absolute; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 5px; width: 86px; }
-.seat .minis { display: grid; grid-template-columns: repeat(2, 26px); gap: 4px; justify-content: center; }
+.seat { position: absolute; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 5px; width: 108px; }
+.seat .minis { display: flex; gap: 3px; justify-content: center; }
 .seat .minis.wide { grid-template-columns: repeat(3, 26px); }
 .seat .who { display: flex; align-items: center; gap: 5px; max-width: 100px; }
 .seat .who .nm { font-size: 12px; font-weight: 700; background: var(--bg); border: 1px solid #2C3A33; padding: 3px 8px; border-radius: 999px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 76px; }
@@ -265,3 +264,10 @@ button.pile { cursor: pointer; }
   #freeze-intro .ic-title { opacity: 1; transform: translateY(-50%); }
   #freeze-intro { backdrop-filter: blur(2px); }
 }
+
+/* Card position numbers (1-4), so you can name a card when you steal one */
+.card .pos { position: absolute; top: 3px; left: 5px; font-family: var(--body); font-size: 11px; font-weight: 700; line-height: 1; color: var(--accent); z-index: 2; }
+.card.up .pos { color: var(--black); opacity: .75; }
+.card.sm .pos { font-size: 8px; top: 2px; left: 3px; }
+.card.pk .pos { font-size: 12px; }
+.seat .minis .card.sm { width: 23px; height: 34px; }
