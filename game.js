@@ -7,6 +7,7 @@ export const SUIT_SYMBOL = { S: '♠︎', H: '♥︎', D: '♦︎', C: '♣︎' 
 export const SUIT_NAME = { S: 'spades', H: 'hearts', D: 'diamonds', C: 'clubs' };
 export const MAX_PLAYERS = 6;
 export const WIN_TOTAL = 4;
+export const MAX_STACK = 2; // never 3 of the same rank stacked on the discard pile
 export const POWERS = { '7': 'p7', '8': 'p8', '10': 'p10' };
 export const POWER_NAMES = { '7': 'Peek at yours', '8': "Peek at a rival's", '10': 'Blind swap' };
 
@@ -49,28 +50,33 @@ export const topDiscard = (st) => (st.discard || [])[(st.discard || []).length -
 
 // ---------- Lobby ----------
 
+export function cleanProfile(p) {
+  const name = String(p.name || '').trim().slice(0, 14) || 'Player';
+  const icon = String(p.icon || '').slice(0, 8) || '❄️';
+  const color = Math.max(0, Math.min(7, Math.round(Number(p.color) || 0)));
+  return { name, icon, color };
+}
+
 export function createRoom(code, host, now = Date.now()) {
   return {
     code,
     hostId: host.id,
     status: 'lobby',
     settings: { mode: 'rounds', bestOf: 3, limit: 100 },
-    players: [{ id: host.id, name: host.name, color: 0 }],
+    players: [{ id: host.id, ...cleanProfile(host) }],
     round: 0, wins: {}, scores: {}, out: {},
     last: { text: 'Room created', t: now },
   };
 }
 
 export function join(st, p, now = Date.now()) {
+  const prof = cleanProfile(p);
   const existing = playerOf(st, p.id);
-  if (existing) { existing.name = p.name; return st; }
+  if (existing) { Object.assign(existing, prof); return st; }
   if (st.status !== 'lobby') fail('This game already started');
   if (st.players.length >= MAX_PLAYERS) fail('This room is full');
-  const used = new Set(st.players.map((x) => x.color));
-  let color = 0;
-  while (used.has(color)) color++;
-  st.players.push({ id: p.id, name: p.name, color });
-  st.last = { text: `${p.name} joined`, t: now };
+  st.players.push({ id: p.id, ...prof });
+  st.last = { text: `${prof.name} joined`, t: now };
   return st;
 }
 
@@ -100,6 +106,7 @@ export function startGame(st, by, rng, now = Date.now()) {
   if (st.status !== 'lobby') fail('The game already started');
   if (st.players.length < 2) fail('You need at least 2 players');
   st.round = 0; st.wins = {}; st.scores = {}; st.out = {};
+  st.gameId = st.code + '-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 7);
   return startRound(st, rng, now);
 }
 
@@ -280,15 +287,33 @@ export function match(st, id, idx, now = Date.now()) {
   const h = st.hands[id];
   pickIndex(h, idx);
   const c = h[idx];
-  if (rankOf(c) === rankOf(top)) {
+  const sameRank = rankOf(c) === rankOf(top);
+  if (sameRank && topRun(st) < MAX_STACK) {
     h.splice(idx, 1);
     st.discard.push(c);
-    st.last = { text: `${nameOf(st, id)} matched the ${rankOf(top)}! Down to ${h.length} cards`, t: now };
+    st.last = { text: `${nameOf(st, id)} matched the ${rankOf(top)}! Down to ${h.length} card${h.length === 1 ? '' : 's'}`, t: now };
   } else {
-    for (let k = 0; k < 2; k++) { const x = drawFromDeck(st); if (x) h.push(x); }
-    st.last = { text: `${nameOf(st, id)} tried ${an(rankOf(c))} ${label(c)} on the ${rankOf(top)}. Wrong! Draws 2`, t: now };
+    // Penalty: the card goes back where it was, and they draw one.
+    const x = drawFromDeck(st);
+    if (x) h.push(x);
+    st.last = {
+      text: sameRank
+        ? `${nameOf(st, id)} tried a third ${rankOf(top)}. Not allowed! Draws 1`
+        : `${nameOf(st, id)} tried ${an(rankOf(c))} ${label(c)} on the ${rankOf(top)}. Wrong! Draws 1`,
+      t: now,
+    };
   }
   return endTurn(st, now);
+}
+
+// How many cards of the same rank sit on top of the discard pile.
+export function topRun(st) {
+  const d = st.discard || [];
+  if (!d.length) return 0;
+  const r = rankOf(d[d.length - 1]);
+  let n = 0;
+  for (let i = d.length - 1; i >= 0 && rankOf(d[i]) === r; i--) n++;
+  return n;
 }
 
 export function callFreeze(st, id, now = Date.now()) {
@@ -348,7 +373,7 @@ export function endRound(st, now = Date.now()) {
 
 export function apply(st, a, by, now = Date.now(), rng = Math.random) {
   switch (a.type) {
-    case 'join': return join(st, { id: by, name: a.name }, now);
+    case 'join': return join(st, { id: by, name: a.name, icon: a.icon, color: a.color }, now);
     case 'leave': return leave(st, by, now);
     case 'settings': return setSettings(st, by, a.settings);
     case 'start': return startGame(st, by, rng, now);

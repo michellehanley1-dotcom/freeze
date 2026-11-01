@@ -29,4 +29,6 @@ Open the link on your iPhone, tap Share > **Add to Home Screen** so it opens lik
 - `firebase-config.js`: your Firebase keys
 - `database.rules.json`: database security rules
 
+Your name, icon, card layout and all-time wins are saved per device. On iPhone, Safari and the Home Screen app keep separate storage, so set up your player in whichever one you'll use.
+
 Note: it's built for friends. A determined player could peek at hidden cards with browser developer tools.
