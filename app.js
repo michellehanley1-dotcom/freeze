@@ -1,4 +1,5 @@
 import * as G from './game.js';
+import * as BOT from './bots.js';
 
 // ---------- Backends: Firebase for real play, browser storage for demo mode ----------
 
@@ -119,7 +120,9 @@ function localBackend() {
       return () => subs.set(code, (subs.get(code) || []).filter((x) => x !== cb));
     },
     async transact(code, fn) {
-      localStorage.setItem(key(code), JSON.stringify(fn(read(code))));
+      const next = fn(read(code));
+      if (next === undefined) return; // the step was no longer needed
+      localStorage.setItem(key(code), JSON.stringify(next));
       notify(code);
     },
     account() { return null; },
@@ -148,6 +151,7 @@ const ui = {
   draft: null, sheet: null, boardTab: 'game', board: null, myStats: null, games: null,
   form: { email: '', pw: '' }, authBusy: false,
   mode: null, sel: null, opening: [], phaseKey: '', toastT: 0,
+  solo: { bots: 2, level: 'easy' }, botT: null, fxKey: null,
   err: null, errTimer: null, busy: false,
 };
 
@@ -231,6 +235,20 @@ function renderHome() {
   const hasProfile = !!ui.profile.name;
   if (!hasProfile && !ui.draft) ui.draft = { ...ui.profile };
   const stats = ui.myStats;
+  const soloPanel = hasProfile ? `<div class="panel">
+      <span class="eyebrow">Play solo</span>
+      <p class="sub" style="font-size:14px;margin:0">Play against computer players. Same rules, same rounds.</p>
+      <span class="eyebrow" style="font-size:11px">Computer players</span>
+      <div class="seg">
+        ${[1, 2, 3].map((n) => `<button type="button" class="btn small ${ui.solo.bots === n ? 'on' : ''}" data-act="soloBots" data-n="${n}" aria-pressed="${ui.solo.bots === n}">${n}</button>`).join('')}
+      </div>
+      <span class="eyebrow" style="font-size:11px">Level</span>
+      <div class="seg">
+        <button type="button" class="btn small ${ui.solo.level === 'easy' ? 'on' : ''}" data-act="soloLevel" data-v="easy" aria-pressed="${ui.solo.level === 'easy'}">Easy</button>
+        <button type="button" class="btn small ${ui.solo.level === 'hard' ? 'on' : ''}" data-act="soloLevel" data-v="hard" aria-pressed="${ui.solo.level === 'hard'}">Hard</button>
+      </div>
+      <button type="button" class="btn primary wide" data-act="soloStart">Play solo</button>
+    </div>` : '';
   return `<section class="screen">
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
       <p class="eyebrow">A memory card game</p>
@@ -260,6 +278,7 @@ function renderHome() {
       ${profileFields(ui.draft, false)}
       <button type="button" class="btn primary wide" data-act="saveProfile">${code ? `Join room ${esc(code)}` : "Let's play"}</button>
     </div>`}
+    ${soloPanel}
     ${ui.backend && ui.backend.demo ? `<p class="banner">Demo mode: open this page in a few browser tabs to test as different players.</p>` : ''}
   </section>`;
 }
@@ -304,7 +323,7 @@ function renderLobby(st) {
     </div>
     ${ui.backend.demo ? `<p class="banner">Demo mode: open this link in another tab to add a player.</p>` : ''}
     <div style="margin-top:auto;display:flex;flex-direction:column;gap:10px">
-      <button type="button" class="btn primary wide" data-act="invite">${ICON.chat} Invite via iMessage</button>
+      ${st.solo ? '' : `<button type="button" class="btn primary wide" data-act="invite">${ICON.chat} Invite via iMessage</button>`}
       ${host ? `<button type="button" class="btn wide" data-act="start" ${st.players.length < 2 ? 'disabled' : ''}>${st.players.length < 2 ? 'Waiting for players…' : `Deal the cards · ${st.players.length} players`}</button>`
       : `<p class="waiting">Waiting for <b>${esc(G.nameOf(st, st.hostId))}</b> to deal…</p>`}
     </div>
@@ -722,6 +741,7 @@ function enterRoom(code) {
   if (ui.unsub) ui.unsub();
   ui.code = code;
   ui.st = null;
+  ui.fxKey = null;
   history.replaceState(null, '', '?room=' + code);
   let first = true;
   ui.unsub = ui.backend.subscribe(code, async (st) => {
@@ -748,8 +768,8 @@ function onState(st) {
     if (st.status === 'playing' && G.currentId(st) === ui.me && st.phase === 'choose' && navigator.vibrate) navigator.vibrate(35);
     ui.phaseKey = key;
   }
-  // Count a finished game toward all-time stats, once per player per game.
-  if (st.status === 'over' && st.gameId && player(st, ui.me)) {
+  // Count a finished game toward all-time stats, once per player per game. Solo games don't count.
+  if (st.status === 'over' && st.gameId && !st.solo && player(st, ui.me)) {
     const k = 'freeze:rec:' + st.gameId;
     if (!ui.store.getItem(k)) {
       ui.store.setItem(k, '1');
@@ -763,21 +783,121 @@ function onState(st) {
       ui.backend.recordGame(ui.me, profileForRoom(), summary.won, summary).then(refreshStats).catch(console.error);
     }
   }
+  fxFor(st);
   ui.st = st;
   render();
+  scheduleBots();
+}
+
+// Icicles when someone calls freeze, and when a round or the whole game is won.
+// The first state seen in a room is only remembered, so joining never replays an old moment.
+function fxFor(st) {
+  if (!window.freezeIntro || !st) return;
+  let key = null, opts = null;
+  if (st.last && st.last.freeze && st.freezeBy) {
+    key = 'f|' + st.last.t;
+    opts = { title: 'FREEZE!', sub: `${G.nameOf(st, st.freezeBy)} called it`, hold: 2000 };
+  } else if ((st.status === 'roundEnd' || st.status === 'over') && st.results) {
+    key = `w|${st.gameId}|${st.round}|${st.status}`;
+    const w = st.results.winners.map((id) => G.nameOf(st, id)).join(' & ');
+    opts = st.status === 'over'
+      ? { title: 'CHAMPION', sub: `${st.champions.map((id) => G.nameOf(st, id)).join(' & ')} wins the game`, hold: 2800 }
+      : { title: 'ROUND WON', sub: w ? `${w} took round ${st.round}` : `Nobody made it to 4 in round ${st.round}`, hold: 2400 };
+  }
+  if (!key) return;
+  if (ui.fxKey === null) { ui.fxKey = key; return; }
+  if (key === ui.fxKey) return;
+  ui.fxKey = key;
+  window.freezeIntro(opts);
 }
 
 function leaveRoom() {
   if (ui.unsub) ui.unsub();
+  clearTimeout(ui.botT); ui.botT = null;
   ui.unsub = null; ui.code = null; ui.st = null; ui.phaseKey = '';
   history.replaceState(null, '', location.pathname);
   refreshStats();
   render();
 }
 
+// ---------- Computer players (solo games) ----------
+// Only the player's own browser runs the bots, one move at a time, through the same rules as everyone else.
+
+const isBotId = (st, id) => !!(st && st.solo && (st.solo.bots || []).includes(id));
+
+// Which computer player should move now, or null.
+function pendingBot(st) {
+  if (!st || !st.solo) return null;
+  if (st.status === 'peek') return st.seats.find((id) => isBotId(st, id) && !st.ready[id]) || null;
+  if (st.status === 'playing') { const id = G.currentId(st); return isBotId(st, id) ? id : null; }
+  return null;
+}
+
+// Makes one bot move on a copy of the room. Returns the new room, or undefined when nothing is needed.
+function botMove(cur, id) {
+  const now = Date.now();
+  if (cur.status === 'peek') {
+    const next = G.apply(JSON.parse(JSON.stringify(cur)), { type: 'ready' }, id, now);
+    BOT.note(cur, id, { type: 'ready' });
+    return next;
+  }
+  let a = BOT.decide(cur, id);
+  if (a) {
+    try {
+      const next = G.apply(JSON.parse(JSON.stringify(cur)), a, id, now);
+      BOT.note(cur, id, a);
+      return next;
+    } catch (e) {
+      if (!(e instanceof G.RuleError)) throw e;
+    }
+  }
+  a = BOT.fallback(cur, id);
+  const next = G.apply(JSON.parse(JSON.stringify(cur)), a, id, now);
+  BOT.note(cur, id, a);
+  return next;
+}
+
+function scheduleBots() {
+  clearTimeout(ui.botT); ui.botT = null;
+  if (!ui.code || !ui.st || !pendingBot(ui.st)) return;
+  ui.botT = setTimeout(botTick, ui.st.status === 'peek' ? 500 : 900);
+}
+
+async function botTick() {
+  ui.botT = null;
+  const code = ui.code;
+  const who = pendingBot(ui.st);
+  if (!code || !who) return;
+  try {
+    await ui.backend.transact(code, (cur) => {
+      if (!cur || pendingBot(cur) !== who) return undefined; // the room moved on
+      return botMove(cur, who);
+    });
+  } catch (e) { console.error(e); }
+}
+
+async function startSolo() {
+  const code = newCode();
+  const bots = BOT.BOTS.slice(0, ui.solo.bots);
+  const level = ui.solo.level;
+  try {
+    await ui.backend.transact(code, (cur) => {
+      if (cur) throw new G.RuleError('Code clash, tap again');
+      const st = G.createRoom(code, { id: ui.me, ...profileForRoom() });
+      for (const b of bots) G.join(st, { id: b.id, name: b.name, icon: b.icon, color: b.color });
+      st.solo = { level, bots: bots.map((b) => b.id) };
+      return st;
+    });
+    enterRoom(code);
+  } catch (e) { showError(e instanceof G.RuleError ? e.message : 'Could not start the game'); console.error(e); }
+}
+
 async function handle(actName, d) {
   const st = ui.st;
   switch (actName) {
+    case 'soloBots': ui.solo.bots = Number(d.n); render(); return;
+    case 'soloLevel': ui.solo.level = d.v === 'hard' ? 'hard' : 'easy'; render(); return;
+    case 'soloStart': return startSolo();
     case 'create': {
       const code = newCode();
       try {

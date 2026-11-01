@@ -220,3 +220,48 @@ button.pile { cursor: pointer; }
 .sheet h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 26px; }
 .sheet ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; font-size: 15px; line-height: 1.4; color: var(--soft); }
 .sheet b { color: var(--text); }
+
+/* ---------- Opening freeze (intro.js) ---------- */
+#freeze-intro {
+  position: fixed; inset: 0; z-index: 1000; overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(214,240,255,.55), rgba(120,180,215,.2) 55%, rgba(11,15,13,0) 80%), rgba(60,110,140,.35);
+  backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px);
+  animation: frostIn .9s ease-out forwards, frostBlur 1.1s ease-out .2s forwards;
+  cursor: pointer; transition: opacity .9s ease, visibility .9s;
+}
+#freeze-intro.thaw { animation: thawOut .9s ease forwards; pointer-events: none; }
+#freeze-intro.thaw .ic { animation: melt .8s ease-in forwards !important; animation-delay: 0s !important; }
+@keyframes thawOut { to { opacity: 0; visibility: hidden; } }
+@keyframes melt { to { transform: scaleY(0); } }
+#freeze-intro .frost {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(circle at 0 0, rgba(255,255,255,.7) 0, rgba(255,255,255,0) 35%),
+    radial-gradient(circle at 100% 0, rgba(255,255,255,.7) 0, rgba(255,255,255,0) 35%),
+    radial-gradient(circle at 0 100%, rgba(255,255,255,.5) 0, rgba(255,255,255,0) 30%),
+    radial-gradient(circle at 100% 100%, rgba(255,255,255,.5) 0, rgba(255,255,255,0) 30%);
+  animation: frostIn 1.2s ease-out forwards;
+}
+#freeze-intro .ic-row { position: absolute; top: 0; left: 0; right: 0; height: 42vh; }
+#freeze-intro .ic {
+  position: absolute; top: 0; transform-origin: 50% 0; transform: scaleY(0); display: block;
+  filter: drop-shadow(0 2px 3px rgba(40,90,130,.35));
+  animation: grow .75s cubic-bezier(.2,.8,.25,1.05) forwards;
+}
+#freeze-intro .ic-title {
+  position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+  text-align: center; font-family: var(--display); font-weight: 800; font-size: clamp(56px, 18vw, 96px);
+  letter-spacing: -0.045em; color: #F4FBFF; text-shadow: 0 0 24px rgba(160,215,245,.9), 0 2px 0 rgba(40,90,130,.4);
+  opacity: 0; animation: titleIn .7s cubic-bezier(.2,.8,.25,1) 1.25s forwards;
+}
+#freeze-intro .ic-sub { font-family: var(--body); font-size: 18px; font-weight: 500; letter-spacing: 0; text-shadow: 0 1px 6px rgba(40,90,130,.6); margin-top: 6px; }
+@keyframes grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes frostIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes frostBlur { to { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); } }
+@keyframes titleIn { from { opacity: 0; transform: translateY(-40%) scale(.92); } to { opacity: 1; transform: translateY(-50%) scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  #freeze-intro, #freeze-intro .frost, #freeze-intro .ic, #freeze-intro .ic-title { animation-duration: .2s !important; animation-delay: 0s !important; }
+  #freeze-intro .ic { transform: scaleY(1); }
+  #freeze-intro .ic-title { opacity: 1; transform: translateY(-50%); }
+  #freeze-intro { backdrop-filter: blur(2px); }
+}
